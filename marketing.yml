@@ -1,0 +1,113 @@
+---
+
+- hosts: localhost
+  vars:
+    cloud_name: production
+  tasks:
+
+    - name: Create a private network
+      os_network:
+        cloud: "{{ cloud_name }}"
+        name: marketing_private
+        external: no
+
+    - name: Add a subnet to the network
+      os_subnet:
+        cloud: "{{ cloud_name }}"
+        name: marketing_private_subnet
+        network_name: marketing_private
+        cidr: 192.168.16.0/24
+        state: present
+
+    - name: Add a keypair
+      os_keypair:
+        cloud: "{{ cloud_name }}"
+        state: present
+        name: marketing_key
+        public_key_file: marketing_key.pub
+
+    - name: Add a security group
+      os_security_group:
+        cloud: "{{ cloud_name }}"
+        name: webserver
+        description: "Normal webserver ports"
+        state: present
+
+    - name: Add rules to security group
+      os_security_group_rule:
+        cloud: "{{ cloud_name }}"
+        security_group: webserver
+        protocol: "{{ item.protocol }}"
+        port_range_min: "{{ item.port }}"
+        port_range_max: "{{ item.port }}"
+        remote_ip_prefix: 0.0.0.0/0
+      with_items:
+        - { protocol: 'icmp', port: '-1'}
+        - { protocol: 'tcp', port: '22'}
+        - { protocol: 'tcp', port: '80'}
+
+    - name: Build a server
+      os_server:
+        cloud: "{{ cloud_name }}"
+        name: marketing_website
+        image: "Fedora 24"
+        key_name: marketing_key
+        flavor: 1GB
+        security_groups: webserver
+        nics:
+            - net-name: public
+            - net-name: marketing_private
+        auto_ip: no
+        state: present
+      register: openstack_servers
+
+    - name: Add host to inventory
+      add_host:
+        name: "{{ openstack_servers.server.name }}"
+        groups: marketing_servers
+        ansible_ssh_host: "{{ openstack_servers.server.public_v4 }}"
+
+    - name: Wait for ssh to respond
+      raw: >
+        ssh -o BatchMode=yes
+        fedora@{{openstack_servers.server.public_v4}} true
+      register: result
+      until: result|success
+      retries: 300
+      delay: 5
+
+- hosts: marketing_servers
+  user: fedora
+  become: yes
+  gather_facts: false
+  tasks:
+
+    - name: Install basics for Ansible
+      raw: dnf -y install python python-dnf libselinux-python
+
+- hosts: marketing_servers
+  user: fedora
+  become: yes
+  tasks:
+
+    - name: Install nginx
+      dnf:
+        name: nginx
+        state: latest
+
+    - name: Start nginx and enable it
+      service:
+        name: nginx
+        state: started
+        enabled: yes
+
+    - name: Removing the existing index.html
+      file:
+        dest: /usr/share/nginx/html/index.html
+        state: absent
+
+    - name: Write a simple HTML file
+      lineinfile:
+        dest: /usr/share/nginx/html/index.html
+        line: "<h1 style='font-family: sans-serif;'>Welcome to the new marketing website!<h1>"
+        create: yes

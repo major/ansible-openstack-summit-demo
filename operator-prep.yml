@@ -1,0 +1,30 @@
+---
+
+- hosts: localhost
+  tasks:
+
+    - name: Create a marketing project
+      os_project:
+        cloud: production
+        name: marketing
+        description: "Project for the Marketing team"
+        domain_id: Default
+        enabled: True
+        state: present
+
+    - name: Create a user in the marketing project
+      os_user:
+        cloud: production
+        name: marketing_admin
+        password: supersecret
+        email: marketing@example.com
+        domain: Default
+        default_project: marketing
+        state: present
+
+    - name: Make the new marketing user an admin
+      os_user_role:
+        cloud: production
+        user: marketing_admin
+        role: admin
+        project: marketing
